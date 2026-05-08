@@ -1,0 +1,18 @@
+# Binaries
+zabbix-agent
+zabbix-agent-linux
+zabbix-agent-windows.exe
+zabbix-agent-macos-arm64
+zabbix-agent-macos-intel
+zabbix-agent-x64-standalone
+
+# Agent state and disk buffers
+metrics.dat
+*.processing
+
+# Config files and test leftovers
+*.conf
+chaos_pids.txt
+
+# Go
+vendor/
