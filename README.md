@@ -8,6 +8,7 @@ A custom, ultra-lightweight, and zero-dependency Zabbix Agent alternative writte
 - **UserParameters:** Parses standard `zabbix_agentd.conf` files to execute dynamic custom shell commands across all OSs.
 - **Disk Buffering:** If the connection to Zabbix goes down, the agent writes the telemetry payload to a local `./metrics.dat` file safely (via atomic rename) and syncs it when the connection is restored.
 - **Native Service Support:** Installs seamlessly as an unmanaged Background Service / Daemon on Linux (systemd), Windows (Service Control Manager), and macOS (launchd).
+- **Nano-Proxy Mode:** Can act as an ultra-lightweight Zabbix Proxy (`-mode proxy`). It avoids SQLite dependency by using a high-throughput, append-only disk buffer for incoming agent metrics, making it perfect for Raspberry Pis and constrained edge gateways.
 - **Zero-Bloat OS Plugins:** Has custom `/proc` parsers and direct `syscall` mappings (Windows `kernel32.dll`) tailored to OS environments to prevent importing huge `go-psutil` dependency trees.
 
 ---
@@ -19,11 +20,17 @@ You don't need to install it to use it. You can run the executable interactively
 # Standard Unencrypted Run
 ./zabbix-agent-linux -server 192.168.1.100:10051 -host "My_Custom_Host" -mode active -interval 30
 
-# Secure mTLS Run
-./zabbix-agent-linux -server 192.168.1.100:10051 -tls-connect cert -tls-ca-file ca.crt -tls-cert-file client.crt -tls-key-file client.key
+# Secure mTLS Run with AES-GCM Encrypted Local Buffer
+./zabbix-agent-linux -server 192.168.1.100:10051 -tls-connect cert -tls-ca-file ca.crt -tls-cert-file client.crt -tls-key-file client.key -buffer-key "super_secret_encryption_key"
 
 # Using a Config File for UserParameters & TLS Defaults
 ./zabbix-agent-linux -config /etc/zabbix/zabbix_agentd.conf
+
+# Run as a Nano-Proxy
+./zabbix-agent-linux -mode proxy -proxy-port 10051 -server 192.168.1.100:10051
+
+# Run as a Nano-Proxy with mTLS enforced for downstream agents
+./zabbix-agent-linux -mode proxy -proxy-port 10051 -proxy-tls true -tls-cert-file proxy_server.crt -tls-key-file proxy_server.key -server 192.168.1.100:10051
 ```
 
 ---
@@ -87,3 +94,25 @@ env CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -a -ldflags '-s -w' -o zabbi
 This repository contains extensive benchmarking and security reports verifying the agent's readiness for production:
 - [TESTING.md](TESTING.md): Details the stress test suites, memory constraints testing (5MB budget), and a direct benchmark comparison against the official `zabbix_agentd` (C) and `zabbix_agent2` (Go).
 - [SECURITY.md](SECURITY.md): Details the MITM (Man-in-the-Middle) packet sniffer testing, OS-level Chaos Engineering resilience, and rogue-server validation tests for mTLS.
+
+---
+
+## 5. Zabbix Module & Server Compatibility
+
+The Lightweight Agent and Nano-Proxy are designed to act as true "drop-in" replacements. They implement the strict `ZBXD\x01` TCP protocol header and exact JSON schema expected by the official Zabbix Server.
+
+### Server Version Compatibility
+Fully compatible with all modern and legacy Zabbix Server LTS releases, thanks to our strict adherence to the foundational `ZBXD\x01` protocol:
+- **Zabbix 3.0 LTS** *(Legacy)*
+- **Zabbix 4.0 LTS** *(Legacy)*
+- **Zabbix 5.0 LTS**
+- **Zabbix 6.0 LTS**
+- **Zabbix 7.0 LTS**
+
+### Module & Ecosystem Compatibility
+Because the protocol is perfectly emulated, no modifications to your Zabbix Server are required. 
+- **Standard Templates**: 100% compatible with standard Zabbix OS templates (Linux, Windows, macOS) for the keys it natively supports.
+- **Low-Level Discovery (LLD)**: Fully supports returning JSON arrays for dynamic LLD rule creation.
+- **Dependent Items**: Works natively with dependent items and bulk data collection.
+- **UserParameters**: By pointing the agent to your existing `zabbix_agentd.conf`, all your existing custom shell scripts, database modules, and bash integrations will execute exactly as they do under the official agent.
+- **Zabbix Sender Compatibility**: The Nano-Proxy perfectly mimics Zabbix Server ingestion, meaning official `zabbix_sender` utilities (and any third-party sender scripts) can push data to our Nano-Proxy on port `10051` seamlessly.

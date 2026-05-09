@@ -1,9 +1,11 @@
-package main
+package config
 
 import (
 	"bufio"
 	"os"
 	"strings"
+
+	"github.com/gvilherme7/zabbix-go/internal/plugins"
 )
 
 type ConfigParams struct {
@@ -48,12 +50,13 @@ func ParseConfig(filePath string) (ConfigParams, error) {
 		} else if strings.HasPrefix(line, "TLSKeyFile=") {
 			params.TLSKeyFile = strings.TrimSpace(line[len("TLSKeyFile="):])
 		} else if strings.HasPrefix(line, "UserParameter=") {
-			val := line[len("UserParameter="):]
-			parts := strings.SplitN(val, ",", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				command := strings.TrimSpace(parts[1])
-				Registry[key] = &UserParamPlugin{key: key, command: command}
+			if strings.HasPrefix(line, "UserParameter=") {
+				parts := strings.SplitN(line[14:], ",", 2)
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0])
+					command := strings.TrimSpace(parts[1])
+					plugins.Registry[key] = plugins.NewUserParamPlugin(key, command)
+				}
 			}
 		}
 	}

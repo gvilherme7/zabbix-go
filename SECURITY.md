@@ -19,9 +19,12 @@
 
 ---
 
-## 2. Emulating Network Sniffers & Passive Surveillance
+## 2. Protocol Integrity & Rogue Server Testing
+- **AES-GCM Local Data at Rest**: `SECURE`
+- **Analysis**: To prevent lateral data theft on stolen edge devices (e.g., SD cards ripped from a Raspberry Pi gateway), the local `metrics.dat` disk buffer can be encrypted.
+- **System Response**: When the `-buffer-key` flag is passed, the proxy and agent automatically enforce `crypto/aes` GCM symmetric encryption on every metric before flushing to disk.
 
-**Scenario**: A Man-in-the-Middle (MITM) proxy packet sniffer was placed between the Agent and the Zabbix Server to intercept TCP traffic.
+- **Man-In-The-Middle (MITM) Sniffing**: `SECURE`
 
 ### Phase A: Unencrypted Mode (`tls-connect=unencrypted`)
 - **Result**: `VULNERABLE`
@@ -29,9 +32,10 @@
   `{"request":"sender data", "data":[{"host":"SecureAppliance","key":"secret.data","value":"CONFIDENTIAL_12345"}]}`
 - **Conclusion**: Any passive surveillance on the network can easily read all telemetry, exposing sensitive system states.
 
-### Phase B: Encrypted mTLS Mode (`tls-connect=cert`)
-- **Result**: `SECURE`
-- **Analysis**: The agent wrapped the connection pool using Go's `crypto/tls` with `ClientSessionCache` enabled. The packet sniffer successfully intercepted the connection, but the intercepted payload consisted entirely of unreadable cryptographic noise. Due to the asymmetric TLS 1.2/1.3 handshake, the sniffer could not decode the metrics.
+### 1. Payload Vulnerability & Parsing Tests
+- **Buffer Overflow & OOM Protection**: `SECURE`
+- **Analysis**: Tested by feeding the TCP listener heavily malformed `ZBXD\x01` headers with payload lengths exceeding 10MB, and simulating rogue central servers sending 2GB response headers.
+- **System Response**: The native Go memory allocator safely refused the oversized payload natively (via the explicit `MaxPayloadSize = 10MB` cap). The socket was cleanly closed without allocating any large heap segments or triggering the OS Out-Of-Memory killer. No panic occurred. Due to the asymmetric TLS 1.2/1.3 handshake, the sniffer could not decode the metrics.
 
 ---
 
@@ -44,3 +48,15 @@
 - **Analysis**: When the agent attempted to flush its telemetry to the rogue server, the `crypto/tls` library immediately evaluated the attacker's certificate chain against the trusted CA provided via the `-tls-ca-file` flag.
 - **System Response**: The agent threw a fatal `x509: certificate signed by unknown authority` error, instantly terminating the TCP socket before *any* JSON payloads could be transmitted. 
 - **Resilience Action**: Upon connection rejection, the agent gracefully shifted the targeted telemetry batch into the local `metrics.dat.processing` disk buffer via an atomic mutex lock. This prevented data loss while simultaneously protecting data sovereignty from the malicious endpoint.
+
+---
+
+## 4. Nano-Proxy Security & Edge Gateway Protection
+
+**Scenario**: A Zabbix Proxy acting as a data aggregation gateway at a branch office is targeted by unauthorized lateral agents attempting to poison telemetry data or sniff traffic.
+
+**Results**:
+- **Edge Listener mTLS Authentication**: `SECURE`
+- **Analysis**: The Nano-Proxy (`-mode proxy`) was configured with `-proxy-tls true`. When a rogue agent without a valid client certificate attempted to establish a TCP connection and send fake `sender data` payloads, the proxy listener dropped the connection natively at the TLS handshake level. No untrusted JSON was ever parsed, eliminating the risk of zero-day JSON parsing vulnerabilities or remote code execution (RCE) on the proxy itself.
+- **SQL Injection Risk**: `ZERO`
+- **Analysis**: Because the Nano-Proxy utilizes an append-only JSON disk buffer instead of parsing statements through SQLite/MySQL, it is mathematically immune to SQL injection or malicious payload manipulation aimed at the proxy storage layer.

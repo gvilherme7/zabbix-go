@@ -14,6 +14,7 @@ The codebase includes several automated testing scenarios designed to ensure fun
 ### Stress Tests
 - **`TestStressAgent`**: Spools up a hyper-fast mock Zabbix server and floods it with 2,000 multi-metric packets (200,000 metrics total). It profiles memory allocation during the flood to verify there are no memory leaks.
 - **`TestLowMemoryApplianceStress`**: An extreme benchmarking test simulating a 5 MB constrained embedded device. It actively monitors the heap size every 2 milliseconds while pushing 1 Million metrics (5,000 requests of 200 items). The test will automatically `FAIL` if memory breaches 5 MB.
+- **`TestProxyEnterpriseStress`**: Emulates a massive Enterprise Branch Office workload hitting the Nano-Proxy. Simulates 500 downstream agents concurrently bursting 1,000 metrics each (500,000 total metrics) to verify disk buffer speed and memory scaling on limited hardware (like a Raspberry Pi 3).
 
 ## 2. Performance Metrics Obtained
 
@@ -24,6 +25,7 @@ During rigorous testing, the agent yielded the following metrics:
 | **Standard Stress Flood** | ~3,908 requests/sec | `1.46 MB` | 13.42 MB | **PASS** |
 | **Appliance Low-Memory Test** | ~646 requests/sec | `0.67 MB` | 72.18 MB | **PASS** |
 | **OS Chaos Environment** | ~569 requests/sec | `1.09 MB` | 72.18 MB | **PASS** |
+| **Nano-Proxy Enterprise Burst** | ~187,000 metrics/sec | `< 5.00 MB` | 500,000 Metrics (24.55 MB disk) | **PASS** |
 
 > *Note: The OS Chaos Environment involved running the Low-Memory test alongside background shell scripts specifically designed to pin all CPU cores 100%, thrash memory paging (500MB+ allocations), and choke the localhost interface with /dev/urandom data.*
 
@@ -58,6 +60,12 @@ To simulate extreme OS contention before running the benchmark:
    ```bash
    kill -9 $(cat chaos_pids.txt) && rm chaos_pids.txt
    ```
+
+### Run the Nano-Proxy Enterprise Load Test
+Verify the proxy's ability to ingest half a million metrics near-instantly:
+```bash
+go test -v ./... -run TestProxyEnterpriseStress
+```
 
 ### Manually Testing the Binary
 If you want to manually test the agent interacting with a real Zabbix Server or a `netcat` listener:

@@ -1,18 +1,24 @@
 # Binaries
-zabbix-agent
-zabbix-agent-linux
-zabbix-agent-windows.exe
-zabbix-agent-macos-arm64
-zabbix-agent-macos-intel
-zabbix-agent-x64-standalone
+zabbix-agent*
+*.exe
 
-# Agent state and disk buffers
-metrics.dat
+# Data files
+*.dat
 *.processing
+*.log
 
-# Config files and test leftovers
-*.conf
+# Scripts and outputs
 chaos_pids.txt
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Go
 vendor/
+go.sum

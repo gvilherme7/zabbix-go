@@ -1,4 +1,4 @@
-package main
+package plugins
 
 import (
 	"os/exec"
@@ -10,6 +10,13 @@ import (
 type UserParamPlugin struct {
 	key     string
 	command string
+}
+
+func NewUserParamPlugin(key, command string) *UserParamPlugin {
+	return &UserParamPlugin{
+		key:     key,
+		command: command,
+	}
 }
 
 func (p *UserParamPlugin) Key() string {
