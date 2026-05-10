@@ -19,6 +19,9 @@ chaos_pids.txt
 ehthumbs.db
 Thumbs.db
 
+# Archives
+*.tar.gz
+*.zip
+
 # Go
 vendor/
-go.sum
