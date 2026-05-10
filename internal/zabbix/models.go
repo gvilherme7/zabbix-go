@@ -3,6 +3,7 @@ package zabbix
 import (
 	"crypto/tls"
 	"net"
+	"strings"
 	"sync"
 )
 
@@ -31,17 +32,21 @@ type ActiveCheckResponse struct {
 }
 
 type Client struct {
-	serverAddr string
+	servers    []string
 	tlsConfig  *tls.Config
 	useTLS     bool
 	conn       net.Conn
 	mu         sync.Mutex
 }
 
-func NewClient(serverAddr string, useTLS bool, tlsConfig *tls.Config) *Client {
+func NewClient(serverAddrs string, useTLS bool, tlsConfig *tls.Config) *Client {
+	var servers []string
+	for _, s := range strings.Split(serverAddrs, ",") {
+		servers = append(servers, strings.TrimSpace(s))
+	}
 	return &Client{
-		serverAddr: serverAddr,
-		useTLS:     useTLS,
-		tlsConfig:  tlsConfig,
+		servers:   servers,
+		useTLS:    useTLS,
+		tlsConfig: tlsConfig,
 	}
 }

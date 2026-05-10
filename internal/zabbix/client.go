@@ -31,14 +31,19 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 	var err error
 	for attempt := 0; attempt < 2; attempt++ {
 		if zc.conn == nil {
-			if zc.useTLS {
-				zc.conn, err = tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", zc.serverAddr, zc.tlsConfig)
-			} else {
-				zc.conn, err = net.DialTimeout("tcp", zc.serverAddr, 5*time.Second)
+			var connErr error
+			for _, srvAddr := range zc.servers {
+				if zc.useTLS {
+					zc.conn, connErr = tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", srvAddr, zc.tlsConfig)
+				} else {
+					zc.conn, connErr = net.DialTimeout("tcp", srvAddr, 5*time.Second)
+				}
+				if connErr == nil {
+					break
+				}
 			}
-			if err != nil {
-				zc.conn = nil
-				return nil, err
+			if zc.conn == nil {
+				return nil, fmt.Errorf("all servers failed to connect, last error: %v", connErr)
 			}
 		}
 

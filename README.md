@@ -9,6 +9,8 @@ A custom, ultra-lightweight, and zero-dependency Zabbix Agent alternative writte
 - **Disk Buffering:** If the connection to Zabbix goes down, the agent writes the telemetry payload to a local `./metrics.dat` file safely (via atomic rename) and syncs it when the connection is restored.
 - **Native Service Support:** Installs seamlessly as an unmanaged Background Service / Daemon on Linux (systemd), Windows (Service Control Manager), and macOS (launchd).
 - **Nano-Proxy Mode:** Can act as an ultra-lightweight Zabbix Proxy (`-mode proxy`). It avoids SQLite dependency by using a high-throughput, append-only disk buffer for incoming agent metrics, making it perfect for Raspberry Pis and constrained edge gateways.
+- **Simultaneous Proxy/Agent Mode:** Can run as both an agent and a proxy simultaneously (e.g., `-mode active+proxy`), sharing memory buffers for maximum efficiency.
+- **Active-Passive Redundancy & Broadcasting:** Provide a comma-separated list of servers to `-server`. The Agent natively handles failover if the primary goes down, while the Nano-Proxy will automatically broadcast downstream metrics to all configured upstream servers simultaneously.
 - **Zero-Bloat OS Plugins:** Has custom `/proc` parsers and direct `syscall` mappings (Windows `kernel32.dll`) tailored to OS environments to prevent importing huge `go-psutil` dependency trees.
 
 ---
@@ -31,6 +33,9 @@ You don't need to install it to use it. You can run the executable interactively
 
 # Run as a Nano-Proxy with mTLS enforced for downstream agents
 ./zabbix-agent-linux -mode proxy -proxy-port 10051 -proxy-tls true -tls-cert-file proxy_server.crt -tls-key-file proxy_server.key -server 192.168.1.100:10051
+
+# Run simultaneously as Agent and Nano-Proxy with multiple fallback/broadcast servers
+./zabbix-agent-linux -mode trapper+proxy -proxy-port 10051 -server 192.168.1.100:10051,192.168.1.101:10051
 ```
 
 ---

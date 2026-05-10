@@ -20,7 +20,7 @@ var (
 )
 
 type Server struct {
-	Client     *zabbix.Client
+	Clients    []*zabbix.Client
 	ListenAddr string
 	UseTLS     bool
 	TLSConfig  *tls.Config
@@ -130,8 +130,16 @@ func (s *Server) handleSenderData(conn net.Conn, payload []byte) {
 }
 
 func (s *Server) handleActiveChecks(conn net.Conn, payload []byte) {
-	// Directly forward payload to central server
-	respBytes, err := s.Client.DoReq(payload)
+	// Query upstream servers until one successfully responds
+	var respBytes []byte
+	var err error
+	for _, client := range s.Clients {
+		respBytes, err = client.DoReq(payload)
+		if err == nil {
+			break
+		}
+	}
+
 	if err != nil {
 		s.writeResponse(conn, `{"response":"failed","info":"central server unreachable"}`)
 		return
@@ -195,8 +203,16 @@ func (s *Server) sendDataRaw(metrics []zabbix.Metric) {
 		Data:    metrics,
 	}
 	jsonData, _ := json.Marshal(packet)
-	if _, err := s.Client.DoReq(jsonData); err != nil {
-		// Re-buffer if failed
+	
+	success := false
+	for _, client := range s.Clients {
+		if _, err := client.DoReq(jsonData); err == nil {
+			success = true
+		}
+	}
+
+	if !success {
+		// Re-buffer if failed to send to ALL servers
 		buffer.WriteMetrics(proxyBufferPath, metrics)
 	}
 }
