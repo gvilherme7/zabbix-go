@@ -21,6 +21,7 @@ type Agent struct {
 	Interval int
 	Mode     string
 	ExitChan <-chan struct{}
+	Session  string
 }
 
 func (a *Agent) Start() {
@@ -175,7 +176,7 @@ func (a *Agent) fetchActiveChecksParsed() ([]activeItem, error) {
 	for _, item := range parsed.Data {
 		items = append(items, activeItem{
 			key:   item.Key,
-			delay: parseDelay(item.Delay),
+			delay: parseDelay(fmt.Sprint(item.Delay)),
 		})
 	}
 	return items, nil
@@ -213,6 +214,17 @@ func (a *Agent) collectKeysAndSend(keys []string) {
 	for _, k := range keys {
 		plugin, exists := plugins.Registry[k]
 		if !exists {
+			mu.Lock()
+			metrics = append(metrics, zabbix.Metric{
+				Id:    len(metrics) + 1,
+				Host:  a.Host,
+				Key:   k,
+				Value: "Cannot evaluate function: item is not supported",
+				State: 1, // 1 = Not supported
+				Clock: time.Now().Unix(),
+				Ns:    time.Now().Nanosecond(),
+			})
+			mu.Unlock()
 			continue
 		}
 		wg.Add(1)
@@ -236,7 +248,14 @@ func (a *Agent) collectKeysAndSend(keys []string) {
 			case res := <-ch:
 				if res.err == nil {
 					mu.Lock()
-					metrics = append(metrics, zabbix.Metric{Host: a.Host, Key: key, Value: res.val})
+					metrics = append(metrics, zabbix.Metric{
+						Id:    len(metrics) + 1,
+						Host:  a.Host,
+						Key:   key,
+						Value: res.val,
+						Clock: time.Now().Unix(),
+						Ns:    time.Now().Nanosecond(),
+					})
 					mu.Unlock()
 				}
 			case <-time.After(5 * time.Second):
@@ -256,18 +275,22 @@ func (a *Agent) sendData(metrics []zabbix.Metric) error {
 		return nil
 	}
 	packet := zabbix.ZabbixPacket{
-		Request: "sender data",
+		Request: "agent data",
+		Session: a.Session,
+		Clock:   time.Now().Unix(),
+		Ns:      time.Now().Nanosecond(),
 		Data:    metrics,
 	}
 	jsonData, err := json.Marshal(packet)
 	if err != nil {
 		return err
 	}
-	_, err = a.Client.DoReq(jsonData)
+	resp, err := a.Client.DoReq(jsonData)
 	if err != nil {
 		buffer.WriteMetrics("metrics.dat", metrics)
 		return err
 	}
+	log.Printf("Sender Response: %s", string(resp))
 	a.flushDiskBuffer()
 	return nil
 }
@@ -282,7 +305,10 @@ func (a *Agent) flushDiskBuffer() {
 
 func (a *Agent) sendDataRaw(metrics []zabbix.Metric) {
 	packet := zabbix.ZabbixPacket{
-		Request: "sender data",
+		Request: "agent data",
+		Session: fmt.Sprintf("%032x", time.Now().UnixNano()+int64(len(a.Host))),
+		Clock:   time.Now().Unix(),
+		Ns:      time.Now().Nanosecond(),
 		Data:    metrics,
 	}
 	jsonData, _ := json.Marshal(packet)

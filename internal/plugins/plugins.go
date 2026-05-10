@@ -2,7 +2,10 @@ package plugins
 
 import (
 	"fmt"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 // Plugin represents a lightweight metric collector
@@ -29,6 +32,40 @@ func init() {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			return fmt.Sprint(m.Alloc), nil
+		},
+	}
+	Registry["system.cpu.load"] = &FuncPlugin{
+		key: "system.cpu.load",
+		fn: func() (string, error) {
+			data, err := os.ReadFile("/proc/loadavg")
+			if err != nil {
+				return "0", err
+			}
+			parts := strings.Split(string(data), " ")
+			if len(parts) > 0 {
+				return parts[0], nil
+			}
+			return "0", nil
+		},
+	}
+	Registry["vm.memory.size"] = &FuncPlugin{
+		key: "vm.memory.size",
+		fn: func() (string, error) {
+			data, err := os.ReadFile("/proc/meminfo")
+			if err != nil {
+				return "0", err
+			}
+			lines := strings.Split(string(data), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "MemTotal:") {
+					parts := strings.Fields(line)
+					if len(parts) >= 2 {
+						val, _ := strconv.ParseInt(parts[1], 10, 64)
+						return fmt.Sprint(val * 1024), nil // Return in bytes
+					}
+				}
+			}
+			return "0", nil
 		},
 	}
 }

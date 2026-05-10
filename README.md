@@ -11,6 +11,9 @@ A custom, ultra-lightweight, and zero-dependency Zabbix Agent alternative writte
 - **Nano-Proxy Mode:** Can act as an ultra-lightweight Zabbix Proxy (`-mode proxy`). It avoids SQLite dependency by using a high-throughput, append-only disk buffer for incoming agent metrics, making it perfect for Raspberry Pis and constrained edge gateways.
 - **Simultaneous Proxy/Agent Mode:** Can run as both an agent and a proxy simultaneously (e.g., `-mode active+proxy`), sharing memory buffers for maximum efficiency.
 - **Active-Passive Redundancy & Broadcasting:** Provide a comma-separated list of servers to `-server`. The Agent natively handles failover if the primary goes down, while the Nano-Proxy will automatically broadcast downstream metrics to all configured upstream servers simultaneously.
+- **Protocol Compression:** Supports native Zabbix protocol compression (`ZBXD\x03`) to drastically reduce bandwidth utilization (`-compress=true`).
+- **Prometheus Self-Monitoring:** Exposes an internal HTTP `/metrics` endpoint to monitor memory usage and thread counts (`-metrics-port=8080`).
+- **Native Log Monitoring & LLD:** Includes a highly efficient native log tailer and local filesystem/network interface discovery (`vfs.fs.discovery`, `net.if.discovery`).
 - **Zero-Bloat OS Plugins:** Has custom `/proc` parsers and direct `syscall` mappings (Windows `kernel32.dll`) tailored to OS environments to prevent importing huge `go-psutil` dependency trees.
 
 ---
@@ -36,6 +39,9 @@ You don't need to install it to use it. You can run the executable interactively
 
 # Run simultaneously as Agent and Nano-Proxy with multiple fallback/broadcast servers
 ./zabbix-agent-linux -mode trapper+proxy -proxy-port 10051 -server 192.168.1.100:10051,192.168.1.101:10051
+
+# Run with Zabbix Protocol Compression and a Prometheus Metrics port
+./zabbix-agent-linux -server 192.168.1.100:10051 -compress=true -metrics-port=8080
 ```
 
 ---
@@ -121,3 +127,11 @@ Because the protocol is perfectly emulated, no modifications to your Zabbix Serv
 - **Dependent Items**: Works natively with dependent items and bulk data collection.
 - **UserParameters**: By pointing the agent to your existing `zabbix_agentd.conf`, all your existing custom shell scripts, database modules, and bash integrations will execute exactly as they do under the official agent.
 - **Zabbix Sender Compatibility**: The Nano-Proxy perfectly mimics Zabbix Server ingestion, meaning official `zabbix_sender` utilities (and any third-party sender scripts) can push data to our Nano-Proxy on port `10051` seamlessly.
+
+---
+
+## 6. Dependencies & Fonts
+This project fiercely guards its memory footprint and cross-compilation simplicity by avoiding heavy dependency trees, CGO, or external fonts. 
+
+The **only** external dependency used is:
+- `github.com/kardianos/service` - Used to provide native, cross-platform OS background service/daemon installations across Linux (systemd), macOS (launchd), and Windows.

@@ -2,6 +2,7 @@ package test
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -41,7 +42,7 @@ func TestProxyEnterpriseStress(t *testing.T) {
 		}
 	}()
 
-	clientToProxy := zabbix.NewClient(serverLn.Addr().String(), false, nil)
+	clientToProxy := zabbix.NewClient(serverLn.Addr().String(), false, nil, false)
 	proxyExit := make(chan struct{})
 	proxySrv := &proxy.Server{
 		Clients:    []*zabbix.Client{clientToProxy},
@@ -126,7 +127,7 @@ func TestOOMProtection(t *testing.T) {
 		// Do not send actual payload, just the header
 	}()
 
-	client := zabbix.NewClient(serverLn.Addr().String(), false, nil)
+	client := zabbix.NewClient(serverLn.Addr().String(), false, nil, false)
 	_, err = client.DoReq([]byte(`{"request":"test"}`))
 	
 	if err == nil {
@@ -168,7 +169,7 @@ func TestFailoverConnectivity(t *testing.T) {
 	deadAddr := "127.0.0.1:65534"
 	servers := deadAddr + "," + server2.Addr().String()
 	
-	client := zabbix.NewClient(servers, false, nil)
+	client := zabbix.NewClient(servers, false, nil, false)
 	
 	start := time.Now()
 	resp, err := client.DoReq([]byte(`{"request":"test"}`))
@@ -195,6 +196,7 @@ func TestSlowlorisProtection(t *testing.T) {
 
 	go func() {
 		conn, err := server.Accept()
+		server.Close()
 		if err == nil {
 			defer conn.Close()
 			buf := make([]byte, 1024)
@@ -217,7 +219,7 @@ func TestSlowlorisProtection(t *testing.T) {
 		}
 	}()
 
-	client := zabbix.NewClient(server.Addr().String(), false, nil)
+	client := zabbix.NewClient(server.Addr().String(), false, nil, false)
 	
 	start := time.Now()
 	_, err = client.DoReq([]byte(`{"request":"test"}`))
@@ -233,4 +235,59 @@ func TestSlowlorisProtection(t *testing.T) {
 	}
 
 	t.Logf("Slowloris protection successfully terminated connection after %v with error: %v", duration, err)
+}
+
+func TestCompressionProtocol(t *testing.T) {
+	// Setup a mock server that receives compressed payload and responds with compressed payload
+	server, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to start compression server: %v", err)
+	}
+	defer server.Close()
+
+	go func() {
+		conn, err := server.Accept()
+		if err == nil {
+			defer conn.Close()
+			header := make([]byte, 13)
+			io.ReadFull(conn, header)
+			if !bytes.Equal(header[:5], []byte("ZBXD\x03")) {
+				return
+			}
+			compLen := binary.LittleEndian.Uint32(header[5:9])
+			payload := make([]byte, compLen)
+			io.ReadFull(conn, payload)
+			
+			// Send compressed success back
+			respStr := `{"response":"success"}`
+			var b bytes.Buffer
+			w := zlib.NewWriter(&b)
+			w.Write([]byte(respStr))
+			w.Close()
+			compResp := b.Bytes()
+			
+			respHeader := []byte("ZBXD\x03")
+			cLen := make([]byte, 4)
+			binary.LittleEndian.PutUint32(cLen, uint32(len(compResp)))
+			uLen := make([]byte, 4)
+			binary.LittleEndian.PutUint32(uLen, uint32(len(respStr)))
+			
+			conn.Write(respHeader)
+			conn.Write(cLen)
+			conn.Write(uLen)
+			conn.Write(compResp)
+		}
+	}()
+
+	client := zabbix.NewClient(server.Addr().String(), false, nil, true)
+	
+	resp, err := client.DoReq([]byte(`{"request":"test"}`))
+	if err != nil {
+		t.Fatalf("Compressed request failed: %v", err)
+	}
+	
+	if !bytes.Contains(resp, []byte("success")) {
+		t.Fatalf("Expected success response, got: %s", string(resp))
+	}
+	t.Logf("Compression protocol (ZBXD\\x03) test passed successfully.")
 }
