@@ -1,5 +1,5 @@
 # Binaries
-zabbix-agent*
+/zabbix-agent*
 *.exe
 
 # Data files
