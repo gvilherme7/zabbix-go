@@ -306,7 +306,7 @@ func (a *Agent) flushDiskBuffer() {
 func (a *Agent) sendDataRaw(metrics []zabbix.Metric) {
 	packet := zabbix.ZabbixPacket{
 		Request: "agent data",
-		Session: fmt.Sprintf("%032x", time.Now().UnixNano()+int64(len(a.Host))),
+		Session: zabbix.NewSessionID(),
 		Clock:   time.Now().Unix(),
 		Ns:      time.Now().Nanosecond(),
 		Data:    metrics,

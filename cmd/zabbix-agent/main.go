@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/gvilherme7/zabbix-go/internal/agent"
 	"github.com/gvilherme7/zabbix-go/internal/buffer"
@@ -31,6 +30,7 @@ type program struct {
 	proxyTLS    bool
 	tlsCertFile string
 	tlsKeyFile  string
+	tlsCAFile   string
 	bufferKey   string
 	metricsPort int
 	compress    bool
@@ -64,11 +64,30 @@ func (p *program) run() {
 		if err != nil {
 			log.Fatalf("Proxy TLS failed to load cert: %v", err)
 		}
+
+		// Security: require and verify a client certificate from downstream
+		// agents (true mTLS). Without ClientCAs/ClientAuth, tls.Config accepts
+		// any TLS client regardless of certificate, which does not match the
+		// documented "mTLS enforced for downstream agents" behavior.
+		if p.tlsCAFile == "" {
+			log.Fatalf("Proxy TLS requires -tls-ca-file to verify downstream agent client certificates")
+		}
+		caCert, err := os.ReadFile(p.tlsCAFile)
+		if err != nil {
+			log.Fatalf("Proxy TLS failed to read CA file: %v", err)
+		}
+		clientCAPool := x509.NewCertPool()
+		if !clientCAPool.AppendCertsFromPEM(caCert) {
+			log.Fatalf("Proxy TLS CA file contains no valid certificates")
+		}
+
 		proxyTLSConf = &tls.Config{
 			Certificates: []tls.Certificate{cert},
+			ClientCAs:    clientCAPool,
+			ClientAuth:   tls.RequireAndVerifyClientCert,
 		}
 	}
-	
+
 	if isProxy {
 		var proxyClients []*zabbix.Client
 		for _, s := range strings.Split(p.server, ",") {
@@ -77,7 +96,7 @@ func (p *program) run() {
 				proxyClients = append(proxyClients, zabbix.NewClient(s, p.tlsConf != nil, p.tlsConf, p.compress))
 			}
 		}
-		
+
 		srv := &proxy.Server{
 			Clients:    proxyClients,
 			ListenAddr: fmt.Sprintf(":%d", p.proxyPort),
@@ -95,12 +114,12 @@ func (p *program) run() {
 
 	if isAgent {
 		client := zabbix.NewClient(p.server, p.tlsConf != nil, p.tlsConf, p.compress)
-		
+
 		agentMode := "trapper"
 		if strings.Contains(p.mode, "active") {
 			agentMode = "active"
 		}
-		
+
 		agt := &agent.Agent{
 			Client:   client,
 			Server:   p.server,
@@ -108,7 +127,7 @@ func (p *program) run() {
 			Interval: p.interval,
 			Mode:     agentMode,
 			ExitChan: p.exit,
-			Session:  fmt.Sprintf("%032x", time.Now().UnixNano()+int64(len(p.host))),
+			Session:  zabbix.NewSessionID(),
 		}
 		agt.Start()
 	}
@@ -195,6 +214,7 @@ func main() {
 		proxyTLS:    *proxyTLS,
 		tlsCertFile: *tlsCertFile,
 		tlsKeyFile:  *tlsKeyFile,
+		tlsCAFile:   *tlsCAFile,
 		bufferKey:   *bufferKey,
 		metricsPort: *metricsPort,
 		compress:    *compress,

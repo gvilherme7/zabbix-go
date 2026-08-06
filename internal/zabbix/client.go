@@ -25,13 +25,13 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 		compressedData := b.Bytes()
 
 		header := []byte("ZBXD\x03")
-		
+
 		compLen := make([]byte, 4)
 		binary.LittleEndian.PutUint32(compLen, uint32(len(compressedData)))
-		
+
 		uncompLen := make([]byte, 4)
 		binary.LittleEndian.PutUint32(uncompLen, uint32(len(jsonData)))
-		
+
 		var buffer bytes.Buffer
 		buffer.Write(header)
 		buffer.Write(compLen)
@@ -42,7 +42,7 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 		header := []byte("ZBXD\x01")
 		dataLen := make([]byte, 8)
 		binary.LittleEndian.PutUint64(dataLen, uint64(len(jsonData)))
-		
+
 		var buffer bytes.Buffer
 		buffer.Write(header)
 		buffer.Write(dataLen)
@@ -75,7 +75,7 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 		// Security: Strict absolute deadline for the entire transaction (Write + Read)
 		// Prevents Slowloris / socket lockups.
 		zc.conn.SetDeadline(time.Now().Add(10 * time.Second))
-		
+
 		if _, err = zc.conn.Write(payload); err != nil {
 			zc.conn.Close()
 			zc.conn = nil
@@ -88,10 +88,10 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 			zc.conn = nil
 			continue
 		}
-		
+
 		if bytes.Equal(respHeader[:5], []byte("ZBXD\x01")) {
 			respLen := binary.LittleEndian.Uint64(respHeader[5:13])
-			
+
 			if respLen > MaxPayloadSize {
 				zc.conn.Close()
 				zc.conn = nil
@@ -105,33 +105,43 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 				continue
 			}
 			return respBody, nil
-			
+
 		} else if bytes.Equal(respHeader[:5], []byte("ZBXD\x03")) {
 			compLen := binary.LittleEndian.Uint32(respHeader[5:9])
 			uncompLen := binary.LittleEndian.Uint32(respHeader[9:13])
-			
+
 			if compLen > MaxPayloadSize || uncompLen > MaxPayloadSize {
 				zc.conn.Close()
 				zc.conn = nil
 				return nil, fmt.Errorf("compressed payload size exceeds safety limit")
 			}
-			
+
 			respBody := make([]byte, compLen)
 			if _, err = io.ReadFull(zc.conn, respBody); err != nil {
 				zc.conn.Close()
 				zc.conn = nil
 				continue
 			}
-			
+
 			b := bytes.NewReader(respBody)
 			r, err := zlib.NewReader(b)
 			if err != nil {
 				return nil, err
 			}
 			defer r.Close()
-			
+
+			// Security: the declared uncompLen is attacker-controlled and unverified
+			// against the actual deflate stream, so it cannot be trusted on its own —
+			// a small compressed payload can still decompress to gigabytes (zip bomb).
+			// Cap the actual decompressed output at MaxPayloadSize regardless.
 			var uncompBuf bytes.Buffer
-			io.Copy(&uncompBuf, r)
+			n, err := io.CopyN(&uncompBuf, r, MaxPayloadSize+1)
+			if err != nil && err != io.EOF {
+				return nil, fmt.Errorf("failed to decompress response: %v", err)
+			}
+			if n > MaxPayloadSize {
+				return nil, fmt.Errorf("decompressed payload exceeds safety limit")
+			}
 			return uncompBuf.Bytes(), nil
 		} else {
 			zc.conn.Close()

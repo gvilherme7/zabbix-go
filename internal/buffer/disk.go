@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -29,25 +30,29 @@ func generateNonce() ([]byte, error) {
 	return nonce, nil
 }
 
-func encryptLine(data []byte) []byte {
+// encryptLine encrypts data with AesKey. When a key is configured, it must
+// never fall back to writing plaintext on error — silently downgrading
+// security is worse than failing loudly, especially for data claimed to be
+// "at rest encrypted" (SECURITY.md).
+func encryptLine(data []byte) ([]byte, error) {
 	if len(AesKey) == 0 {
-		return data
+		return data, nil
 	}
 	block, err := aes.NewCipher(AesKey)
 	if err != nil {
-		return data // Fallback to plaintext if key is invalid, though it should be validated earlier
+		return nil, fmt.Errorf("invalid buffer encryption key: %v", err)
 	}
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return data
+		return nil, fmt.Errorf("gcm init failed: %v", err)
 	}
 	nonce, err := generateNonce()
 	if err != nil {
-		return data
+		return nil, fmt.Errorf("nonce generation failed: %v", err)
 	}
 	ciphertext := aesgcm.Seal(nil, nonce, data, nil)
 	// Prepend nonce to ciphertext
-	return append(nonce, ciphertext...)
+	return append(nonce, ciphertext...), nil
 }
 
 func decryptLine(data []byte) []byte {
@@ -86,8 +91,12 @@ func WriteMetrics(filePath string, metrics []zabbix.Metric) error {
 
 	for _, m := range metrics {
 		line, _ := json.Marshal(m)
-		line = encryptLine(line)
-		file.Write(line)
+		encLine, err := encryptLine(line)
+		if err != nil {
+			log.Printf("[Buffer] Refusing to write metric %q to disk unencrypted: %v", m.Key, err)
+			continue
+		}
+		file.Write(encLine)
 		file.Write([]byte("\n"))
 	}
 	return nil
@@ -122,7 +131,7 @@ func Flush(filePath string) []zabbix.Metric {
 		if len(strings.TrimSpace(string(l))) == 0 {
 			continue
 		}
-		
+
 		decrypted := decryptLine(l)
 		if decrypted == nil {
 			log.Println("[Buffer] Warning: Failed to decrypt a buffered metric. Corruption or key mismatch.")

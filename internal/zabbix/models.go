@@ -1,11 +1,27 @@
 package zabbix
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
 )
+
+// NewSessionID generates a random 32-character hex session token via
+// crypto/rand. A timestamp-derived ID (e.g. fmt.Sprintf("%032x", UnixNano()))
+// is predictable and mostly constant padding, since UnixNano() only fills the
+// low ~8 bytes of a 16-byte hex string — this gives the full 128 bits of entropy
+// Zabbix session tokens are expected to have.
+func NewSessionID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("zabbix: failed to generate session id: %v", err))
+	}
+	return hex.EncodeToString(b)
+}
 
 type Metric struct {
 	Id    int    `json:"id,omitempty"`
@@ -39,12 +55,12 @@ type ActiveCheckResponse struct {
 }
 
 type Client struct {
-	servers    []string
-	tlsConfig  *tls.Config
-	useTLS     bool
-	compress   bool
-	conn       net.Conn
-	mu         sync.Mutex
+	servers   []string
+	tlsConfig *tls.Config
+	useTLS    bool
+	compress  bool
+	conn      net.Conn
+	mu        sync.Mutex
 }
 
 func NewClient(serverAddrs string, useTLS bool, tlsConfig *tls.Config, compress bool) *Client {
