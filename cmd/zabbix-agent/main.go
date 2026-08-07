@@ -127,7 +127,6 @@ func (p *program) run() {
 			Interval: p.interval,
 			Mode:     agentMode,
 			ExitChan: p.exit,
-			Session:  zabbix.NewSessionID(),
 		}
 		agt.Start()
 	}

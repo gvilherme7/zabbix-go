@@ -37,7 +37,11 @@ You don't need to install it to use it. You can run the executable interactively
 # Run as a Nano-Proxy with mTLS enforced for downstream agents
 # -tls-ca-file is required here: it's the CA the proxy uses to verify each
 # downstream agent's client certificate (true mutual TLS, not just a TLS listener).
-./zabbix-agent-linux -mode proxy -proxy-port 10051 -proxy-tls true -tls-cert-file proxy_server.crt -tls-key-file proxy_server.key -tls-ca-file downstream_ca.crt -server 192.168.1.100:10051
+# Note the "=" on -proxy-tls: Go's flag package only treats a bare "-proxy-tls true"
+# as the flag by itself (true) plus a stray positional argument, which stops ALL
+# further flag parsing — every flag after it, including the TLS file paths, would
+# silently be ignored and the proxy would fail to start.
+./zabbix-agent-linux -mode proxy -proxy-port 10051 -proxy-tls=true -tls-cert-file proxy_server.crt -tls-key-file proxy_server.key -tls-ca-file downstream_ca.crt -server 192.168.1.100:10051
 
 # Run simultaneously as Agent and Nano-Proxy with multiple fallback/broadcast servers
 ./zabbix-agent-linux -mode trapper+proxy -proxy-port 10051 -server 192.168.1.100:10051,192.168.1.101:10051

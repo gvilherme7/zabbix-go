@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,27 +52,40 @@ func encryptLine(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("nonce generation failed: %v", err)
 	}
 	ciphertext := aesgcm.Seal(nil, nonce, data, nil)
-	// Prepend nonce to ciphertext
-	return append(nonce, ciphertext...), nil
+	// Prepend nonce to ciphertext. This blob is arbitrary binary — it can and
+	// regularly does contain raw 0x0A bytes — so it must be base64-encoded
+	// before going into a newline-delimited file. Without this, Flush's
+	// bytes.Split(data, []byte("\n")) fragments the ciphertext at those
+	// embedded newlines and every record fails to decrypt.
+	blob := append(nonce, ciphertext...)
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(blob)))
+	base64.StdEncoding.Encode(encoded, blob)
+	return encoded, nil
 }
 
 func decryptLine(data []byte) []byte {
 	if len(AesKey) == 0 {
 		return data
 	}
-	if len(data) < 12 {
-		return data
+	blob := make([]byte, base64.StdEncoding.DecodedLen(len(data)))
+	n, err := base64.StdEncoding.Decode(blob, data)
+	if err != nil {
+		return nil // Invalid or corrupted data
+	}
+	blob = blob[:n]
+	if len(blob) < 12 {
+		return nil
 	}
 	block, err := aes.NewCipher(AesKey)
 	if err != nil {
-		return data
+		return nil
 	}
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return data
+		return nil
 	}
-	nonce := data[:12]
-	ciphertext := data[12:]
+	nonce := blob[:12]
+	ciphertext := blob[12:]
 	plaintext, err := aesgcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return nil // Invalid or corrupted data

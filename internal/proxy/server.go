@@ -203,10 +203,23 @@ func (s *Server) sendDataRaw(metrics []zabbix.Metric) {
 		Data:    metrics,
 	}
 	jsonData, _ := json.Marshal(packet)
-	
+
 	success := false
 	for _, client := range s.Clients {
-		if _, err := client.DoReq(jsonData); err == nil {
+		resp, err := client.DoReq(jsonData)
+		if err != nil {
+			continue
+		}
+		// A nil transport error only means the server accepted the TCP
+		// connection and replied — it says nothing about whether the data
+		// was actually stored (e.g. a server that's up but hasn't finished
+		// loading its config cache replies "success" with processed:0).
+		// Trusting the transport alone here would permanently drop the local
+		// buffer for data the server never kept.
+		var ack struct {
+			Response string `json:"response"`
+		}
+		if json.Unmarshal(resp, &ack) == nil && ack.Response == "success" {
 			success = true
 		}
 	}

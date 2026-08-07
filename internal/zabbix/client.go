@@ -57,17 +57,31 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if zc.conn == nil {
 			var connErr error
+			dialed := false
 			for _, srvAddr := range zc.servers {
+				var c net.Conn
+				var err error
 				if zc.useTLS {
-					zc.conn, connErr = tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", srvAddr, zc.tlsConfig)
+					c, err = tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", srvAddr, zc.tlsConfig)
 				} else {
-					zc.conn, connErr = net.DialTimeout("tcp", srvAddr, 5*time.Second)
+					c, err = net.DialTimeout("tcp", srvAddr, 5*time.Second)
 				}
-				if connErr == nil {
-					break
+				if err != nil {
+					connErr = err
+					continue
 				}
+				// Assign zc.conn only on a confirmed successful dial. A
+				// failed TLS handshake (e.g. rejected/untrusted client or
+				// server cert) can make tls.DialWithDialer return a non-nil
+				// net.Conn interface wrapping a nil *tls.Conn — the classic
+				// typed-nil trap. "zc.conn == nil" below would not have
+				// caught that, and calling SetDeadline on it segfaults the
+				// whole process. err is the only reliable success signal.
+				zc.conn = c
+				dialed = true
+				break
 			}
-			if zc.conn == nil {
+			if !dialed {
 				return nil, fmt.Errorf("all servers failed to connect, last error: %v", connErr)
 			}
 		}
@@ -104,6 +118,15 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 				zc.conn = nil
 				continue
 			}
+			// The Zabbix trapper protocol is one transaction per TCP connection:
+			// the server processes exactly one request then drops its side.
+			// Reusing this connection for the next DoReq call doesn't error at
+			// the transport level, but the server silently fails to resolve
+			// items on it — values still parse, but nothing gets stored. Close
+			// after every request so each call always dials fresh, matching
+			// zabbix_sender/real agent behavior.
+			zc.conn.Close()
+			zc.conn = nil
 			return respBody, nil
 
 		} else if bytes.Equal(respHeader[:5], []byte("ZBXD\x03")) {
@@ -142,6 +165,9 @@ func (zc *Client) DoReq(jsonData []byte) ([]byte, error) {
 			if n > MaxPayloadSize {
 				return nil, fmt.Errorf("decompressed payload exceeds safety limit")
 			}
+			// See the ZBXD\x01 branch above: one transaction per connection.
+			zc.conn.Close()
+			zc.conn = nil
 			return uncompBuf.Bytes(), nil
 		} else {
 			zc.conn.Close()

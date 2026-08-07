@@ -21,7 +21,6 @@ type Agent struct {
 	Interval int
 	Mode     string
 	ExitChan <-chan struct{}
-	Session  string
 }
 
 func (a *Agent) Start() {
@@ -270,13 +269,32 @@ func (a *Agent) collectKeysAndSend(keys []string) {
 	}
 }
 
+// requestType returns the Zabbix protocol request name for this agent's
+// mode. "active checks" results are reported via "agent data" and only
+// match items of type "Zabbix agent (active)". Trapper mode is meant to
+// emulate zabbix_sender pushing to Trapper-type items, which the server
+// only accepts under the "sender data" request — sending "agent data" here
+// would make every Trapper item fail with a generic validation error.
+func (a *Agent) requestType() string {
+	if a.Mode == "trapper" {
+		return "sender data"
+	}
+	return "agent data"
+}
+
 func (a *Agent) sendData(metrics []zabbix.Metric) error {
 	if len(metrics) == 0 {
 		return nil
 	}
+	// A fresh session id per request, not a.Session — Zabbix Server tracks
+	// sessions to protect against replayed/flooded active-check data, and
+	// silently discards data (parses fine, but processed:0) once it has
+	// already seen a session id from that host. Reusing one fixed session
+	// for the agent's whole lifetime meant only the very first push after
+	// startup was ever actually stored.
 	packet := zabbix.ZabbixPacket{
-		Request: "agent data",
-		Session: a.Session,
+		Request: a.requestType(),
+		Session: zabbix.NewSessionID(),
 		Clock:   time.Now().Unix(),
 		Ns:      time.Now().Nanosecond(),
 		Data:    metrics,
@@ -305,7 +323,7 @@ func (a *Agent) flushDiskBuffer() {
 
 func (a *Agent) sendDataRaw(metrics []zabbix.Metric) {
 	packet := zabbix.ZabbixPacket{
-		Request: "agent data",
+		Request: a.requestType(),
 		Session: zabbix.NewSessionID(),
 		Clock:   time.Now().Unix(),
 		Ns:      time.Now().Nanosecond(),
