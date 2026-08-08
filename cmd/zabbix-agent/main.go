@@ -32,6 +32,7 @@ type program struct {
 	tlsKeyFile  string
 	tlsCAFile   string
 	bufferKey   string
+	bufferMaxMB int
 	metricsPort int
 	compress    bool
 	tlsConf     *tls.Config
@@ -52,6 +53,7 @@ func (p *program) run() {
 		hash := sha256.Sum256([]byte(p.bufferKey))
 		buffer.AesKey = hash[:]
 	}
+	buffer.MaxBufferBytes = int64(p.bufferMaxMB) * 1024 * 1024
 
 	metrics.StartPrometheusServer(p.metricsPort)
 
@@ -138,6 +140,30 @@ func (p *program) Stop(s service.Service) error {
 	return nil
 }
 
+// serviceArgs returns the command-line arguments to persist for the
+// installed service, forwarding everything the operator passed except the
+// -service flag itself (and its value, e.g. "install") — that flag controls
+// this one-off invocation, not what the running service should do.
+func serviceArgs() []string {
+	var args []string
+	skipNext := false
+	for _, a := range os.Args[1:] {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if a == "-service" || a == "--service" {
+			skipNext = true
+			continue
+		}
+		if strings.HasPrefix(a, "-service=") || strings.HasPrefix(a, "--service=") {
+			continue
+		}
+		args = append(args, a)
+	}
+	return args
+}
+
 func main() {
 	svcFlag := flag.String("service", "", "Control the system service: 'install', 'uninstall', 'start', 'stop', 'restart'")
 	server := flag.String("server", "127.0.0.1:10051", "Zabbix Server IP:Port (comma-separated for failover/broadcast)")
@@ -152,6 +178,7 @@ func main() {
 	proxyPort := flag.Int("proxy-port", 10051, "Port to listen on when in proxy mode")
 	proxyTLS := flag.Bool("proxy-tls", false, "Use TLS for incoming proxy connections (requires tls-cert-file and tls-key-file)")
 	bufferKey := flag.String("buffer-key", "", "If provided, enables AES-GCM encryption for local disk buffers")
+	bufferMaxMB := flag.Int("buffer-max-mb", 100, "Max size in MB for the local disk buffer file before new metrics are dropped instead of growing it further (0 disables the cap)")
 	metricsPort := flag.Int("metrics-port", 0, "Port to expose Prometheus /metrics (0 to disable)")
 	compress := flag.Bool("compress", false, "Enable Zabbix protocol compression (ZBXD\\x03)")
 	flag.Parse()
@@ -215,6 +242,7 @@ func main() {
 		tlsKeyFile:  *tlsKeyFile,
 		tlsCAFile:   *tlsCAFile,
 		bufferKey:   *bufferKey,
+		bufferMaxMB: *bufferMaxMB,
 		metricsPort: *metricsPort,
 		compress:    *compress,
 		tlsConf:     tlsConf,
@@ -224,14 +252,13 @@ func main() {
 		Name:        "zabbix-agent-lightweight",
 		DisplayName: "Zabbix Agent (Lightweight Custom)",
 		Description: "A super lightweight standalone Zabbix Agent data pusher.",
-		Arguments: []string{
-			fmt.Sprintf("-server=%s", *server),
-			fmt.Sprintf("-host=%s", *host),
-			fmt.Sprintf("-interval=%d", *interval),
-			fmt.Sprintf("-mode=%s", *mode),
-			fmt.Sprintf("-proxy-port=%d", *proxyPort),
-			fmt.Sprintf("-proxy-tls=%v", *proxyTLS),
-		},
+		// Forward every flag the operator passed to "-service install", not a
+		// hardcoded subset — TLS, mTLS, buffer encryption, compression, and
+		// -config were previously dropped from the installed service
+		// entirely, meaning a service installed with e.g. -buffer-key or
+		// -tls-connect cert would silently run without them on every future
+		// start/reboot.
+		Arguments: serviceArgs(),
 	}
 
 	s, err := service.New(prg, svcConfig)

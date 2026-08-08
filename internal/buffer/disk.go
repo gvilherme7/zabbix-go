@@ -20,6 +20,12 @@ import (
 var (
 	GlobalMutex sync.Mutex
 	AesKey      []byte
+	// MaxBufferBytes caps how large a single disk buffer file may grow.
+	// Without a cap, a prolonged server outage makes metrics.dat /
+	// proxy_metrics.dat grow forever, which can fill the disk on a
+	// long-running deployment. 0 disables the cap. Set from main via
+	// -buffer-max-mb.
+	MaxBufferBytes int64 = 100 * 1024 * 1024
 )
 
 // Generate a 12-byte nonce
@@ -96,6 +102,13 @@ func decryptLine(data []byte) []byte {
 func WriteMetrics(filePath string, metrics []zabbix.Metric) error {
 	GlobalMutex.Lock()
 	defer GlobalMutex.Unlock()
+
+	if MaxBufferBytes > 0 {
+		if info, err := os.Stat(filePath); err == nil && info.Size() >= MaxBufferBytes {
+			log.Printf("[Buffer] %s is at its %d MB safety cap; dropping %d metrics instead of growing further. A prolonged outage is losing data — check connectivity to the server.", filePath, MaxBufferBytes/(1024*1024), len(metrics))
+			return nil
+		}
+	}
 
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {

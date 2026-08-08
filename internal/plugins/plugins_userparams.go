@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -30,6 +31,33 @@ func NewUserParamPlugin(key, command string) *UserParamPlugin {
 
 func (p *UserParamPlugin) Key() string {
 	return p.key
+}
+
+// WithParams returns a copy of the plugin with $1.."$9" in its command
+// replaced by the given values, matching the standard Zabbix
+// "UserParameter=key[*],cmd $1" convention. Substitutions are shell-quoted:
+// the parameter values arrive over the network in the active-checks/config
+// response, and naive string substitution into a shell command would let a
+// value containing shell metacharacters escape its argument.
+func (p *UserParamPlugin) WithParams(params []string) *UserParamPlugin {
+	cmd := p.command
+	for i := len(params); i >= 1; i-- {
+		placeholder := fmt.Sprintf("$%d", i)
+		cmd = strings.ReplaceAll(cmd, placeholder, quoteArg(params[i-1]))
+	}
+	return &UserParamPlugin{key: p.key, command: cmd}
+}
+
+// quoteArg shell-quotes a single value for safe substitution into a command
+// string. POSIX shells: wrap in single quotes, escaping embedded single
+// quotes. Windows cmd.exe has no fully safe quoting for arbitrary strings;
+// wrapping in double quotes and doubling embedded ones covers the common
+// case, same practical limitation the official Windows agent has.
+func quoteArg(s string) string {
+	if runtime.GOOS == "windows" {
+		return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func (p *UserParamPlugin) Collect() (string, error) {

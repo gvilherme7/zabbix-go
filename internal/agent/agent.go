@@ -211,7 +211,7 @@ func (a *Agent) collectKeysAndSend(keys []string) {
 	var wg sync.WaitGroup
 
 	for _, k := range keys {
-		plugin, exists := plugins.Registry[k]
+		plugin, exists := plugins.Lookup(k)
 		if !exists {
 			mu.Lock()
 			metrics = append(metrics, zabbix.Metric{

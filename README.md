@@ -5,8 +5,8 @@ A custom, ultra-lightweight, and zero-dependency Zabbix Agent alternative writte
 ### Key Features
 - **Tiny Footprint:** Runs statically with an active heap size of less than `1 MB`, proven in highly constrained appliance testing.
 - **Hybrid Modes:** Supports both classic Trapper Mode and a true Active Checks Scheduler that respects item-specific intervals.
-- **UserParameters:** Parses standard `zabbix_agentd.conf` files to execute dynamic custom shell commands across all OSs.
-- **Disk Buffering:** If the connection to Zabbix goes down, the agent writes the telemetry payload to a local `./metrics.dat` file safely (via atomic rename) and syncs it when the connection is restored.
+- **UserParameters:** Parses standard `zabbix_agentd.conf` files to execute dynamic custom shell commands across all OSs, including parameterized items (`UserParameter=vfs.file.size[*],stat -c%s $1`).
+- **Disk Buffering:** If the connection to Zabbix goes down, the agent writes the telemetry payload to a local `./metrics.dat` file safely (via atomic rename) and syncs it when the connection is restored. Capped at `100 MB` by default (`-buffer-max-mb`) so a prolonged outage can't fill the disk.
 - **Native Service Support:** Installs seamlessly as an unmanaged Background Service / Daemon on Linux (systemd), Windows (Service Control Manager), and macOS (launchd).
 - **Nano-Proxy Mode:** Can act as an ultra-lightweight Zabbix Proxy (`-mode proxy`). It avoids SQLite dependency by using a high-throughput, append-only disk buffer for incoming agent metrics, making it perfect for Raspberry Pis and constrained edge gateways.
 - **Simultaneous Proxy/Agent Mode:** Can run as both an agent and a proxy simultaneously (e.g., `-mode active+proxy`), sharing memory buffers for maximum efficiency.

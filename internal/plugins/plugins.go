@@ -17,6 +17,75 @@ type Plugin interface {
 // Registry holds our active metric gatherers without CGO or big plugins
 var Registry = make(map[string]Plugin)
 
+// Lookup resolves a requested item key against the Registry. It first tries
+// an exact match (covers every built-in plugin and non-parameterized
+// UserParameters). If that fails and the key has the form "base[p1,p2,...]",
+// it looks for a UserParameter registered as "base[*]" — the standard
+// Zabbix pattern for parameterized UserParameters, e.g.
+// "UserParameter=vfs.file.size[*],stat -c%s $1" matching a requested key of
+// "vfs.file.size[/var/log/syslog]" — and returns a plugin instance with
+// $1.."$9" substituted into its command.
+func Lookup(key string) (Plugin, bool) {
+	if p, ok := Registry[key]; ok {
+		return p, true
+	}
+
+	base, params, ok := splitKeyParams(key)
+	if !ok {
+		return nil, false
+	}
+
+	if p, ok := Registry[base+"[*]"]; ok {
+		if up, ok := p.(*UserParamPlugin); ok {
+			return up.WithParams(params), true
+		}
+	}
+	return nil, false
+}
+
+// splitKeyParams parses a Zabbix item key of the form "base[p1,p2,...]" into
+// its base key and parameter list. Parameters may be double-quoted to
+// contain commas, spaces, or brackets; a backslash escapes a quote inside a
+// quoted parameter. Unquoted parameters are taken verbatim (including
+// surrounding whitespace, matching Zabbix's own key parsing).
+func splitKeyParams(key string) (base string, params []string, ok bool) {
+	i := strings.IndexByte(key, '[')
+	if i < 0 || !strings.HasSuffix(key, "]") {
+		return "", nil, false
+	}
+	base = key[:i]
+	inner := key[i+1 : len(key)-1]
+	return base, parseParams(inner), true
+}
+
+func parseParams(inner string) []string {
+	if inner == "" {
+		return nil
+	}
+	var params []string
+	var cur strings.Builder
+	quoted := false
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		switch {
+		case c == '"' && cur.Len() == 0 && !quoted:
+			quoted = true
+		case c == '"' && quoted:
+			quoted = false
+		case c == '\\' && quoted && i+1 < len(inner) && inner[i+1] == '"':
+			cur.WriteByte('"')
+			i++
+		case c == ',' && !quoted:
+			params = append(params, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	params = append(params, cur.String())
+	return params
+}
+
 func init() {
 	// Register base cross-platform plugins
 	Registry["agent.ping"] = &StaticPlugin{key: "agent.ping", val: "1"}
@@ -76,7 +145,7 @@ type StaticPlugin struct {
 	val string
 }
 
-func (p *StaticPlugin) Key() string { return p.key }
+func (p *StaticPlugin) Key() string              { return p.key }
 func (p *StaticPlugin) Collect() (string, error) { return p.val, nil }
 
 // FuncPlugin uses a callback function
@@ -85,5 +154,5 @@ type FuncPlugin struct {
 	fn  func() (string, error)
 }
 
-func (p *FuncPlugin) Key() string { return p.key }
+func (p *FuncPlugin) Key() string              { return p.key }
 func (p *FuncPlugin) Collect() (string, error) { return p.fn() }
